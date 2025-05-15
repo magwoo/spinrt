@@ -18,6 +18,7 @@ pub use handle::JoinHandle;
 mod handle;
 
 pub mod macros;
+pub mod net;
 pub mod time;
 
 static SHARED_QUEUE: OnceLock<SharedQueue<Task>> = OnceLock::new();
