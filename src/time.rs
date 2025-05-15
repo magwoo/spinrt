@@ -1,5 +1,5 @@
 use std::pin::Pin;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 pub struct Timer(Instant);
@@ -7,7 +7,7 @@ pub struct Timer(Instant);
 impl Future for Timer {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         if Instant::now() > self.0 {
             return Poll::Ready(());
         }

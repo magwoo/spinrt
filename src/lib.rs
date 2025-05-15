@@ -5,11 +5,16 @@ use crossbeam_deque::Stealer;
 use crossbeam_deque::Worker as WorkerQueue;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 use std::time::Duration;
 use std::time::Instant;
+
+pub use join::JoinHandle;
+
+mod join;
 
 pub mod time;
 
@@ -54,14 +59,27 @@ impl Runtime {
         Self { shared_queue }
     }
 
-    pub fn block_on(&self, future: impl Future<Output = ()> + 'static + Send) {
-        self.shared_queue.push(Task::new(future));
+    pub fn spawn<T: 'static + Send>(
+        &self,
+        future: impl Future<Output = T> + 'static + Send,
+    ) -> JoinHandle<T> {
+        let result = Arc::new(Mutex::new(None));
 
-        self.event_loop();
+        let result_cloned = Arc::clone(&result);
+        let wrapped_future = async move {
+            let result = future.await;
+            *result_cloned.lock().unwrap() = Some(result);
+        };
+
+        self.shared_queue.push(Task::new(wrapped_future));
+
+        JoinHandle::new(result)
     }
 
-    fn event_loop(&self) {
-        loop {
+    pub fn block_on(&self, future: impl Future<Output = ()> + 'static + Send) {
+        let handle = self.spawn(future);
+
+        while handle.is_ready().is_none() {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
@@ -120,30 +138,12 @@ impl Task {
     }
 
     fn run(mut self, local_queue: &WorkerQueue<Self>) {
-        // let waker = new_waker(&());
         let waker = Waker::noop();
 
+        // FIXME: move result return here
         match self.future.as_mut().poll(&mut Context::from_waker(waker)) {
             Poll::Ready(_) => println!("some task is done"),
             Poll::Pending => local_queue.push(self),
         }
     }
 }
-
-// fn new_waker(data: &()) -> Waker {
-//     fn wake(_data: *const ()) {}
-
-//     fn wake_by_ref(data: *const ()) {
-//         let
-//     }
-
-//     fn drop(_: *const ()) {}
-
-//     const fn new_raw_waker(data: *const ()) -> RawWaker {
-//         const VTABLE: RawWakerVTable = RawWakerVTable::new(new_raw_waker, wake, wake_by_ref, drop);
-
-//         RawWaker::new(data, &VTABLE)
-//     }
-
-//     unsafe { Waker::from_raw(new_raw_waker(data as *const _)) }
-// }
