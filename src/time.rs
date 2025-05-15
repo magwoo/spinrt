@@ -2,9 +2,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-pub struct Timer(Instant);
+pub struct Sleep(Instant);
 
-impl Future for Timer {
+impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -16,8 +16,8 @@ impl Future for Timer {
     }
 }
 
-pub fn sleep(duration: Duration) -> Timer {
+pub fn sleep(duration: Duration) -> Sleep {
     let since = Instant::now().checked_add(duration).unwrap();
 
-    Timer(since)
+    Sleep(since)
 }

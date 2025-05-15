@@ -6,17 +6,21 @@ use crossbeam_deque::Worker as WorkerQueue;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 use std::time::Duration;
 use std::time::Instant;
 
-pub use join::JoinHandle;
+pub use handle::JoinHandle;
 
-mod join;
+mod handle;
 
+pub mod macros;
 pub mod time;
+
+static SHARED_QUEUE: OnceLock<SharedQueue<Task>> = OnceLock::new();
 
 struct Task {
     future: Pin<Box<dyn Future<Output = ()> + 'static + Send>>,
@@ -24,64 +28,53 @@ struct Task {
 
 struct Worker {
     local_queue: WorkerQueue<Task>,
-    shared_queue: Arc<SharedQueue<Task>>,
     stealers: Arc<[Stealer<Task>]>,
 }
 
-#[derive(Default)]
-pub struct Runtime {
-    shared_queue: Arc<SharedQueue<Task>>,
+pub fn create(workers_num: usize) {
+    SHARED_QUEUE.get_or_init(SharedQueue::default);
+
+    let workers_queues = (0..workers_num)
+        .map(|_| WorkerQueue::new_lifo())
+        .collect::<Vec<_>>();
+
+    let stealers = workers_queues
+        .iter()
+        .map(|q| q.stealer())
+        .collect::<Arc<[_]>>();
+
+    workers_queues
+        .into_iter()
+        .map(|q| Worker {
+            local_queue: q,
+            stealers: stealers.clone(),
+        })
+        .for_each(|w| {
+            std::thread::spawn(|| w.event_loop());
+        });
 }
 
-impl Runtime {
-    pub fn new(workers_num: usize) -> Self {
-        let shared_queue = Arc::new(SharedQueue::default());
-        let workers_queues = (0..workers_num)
-            .map(|_| WorkerQueue::new_lifo())
-            .collect::<Vec<_>>();
+pub fn spawn<T: 'static + Send>(future: impl Future<Output = T> + 'static + Send) -> JoinHandle<T> {
+    let shared_queue = SHARED_QUEUE.get().expect("Runtime is not created");
 
-        let stealers = workers_queues
-            .iter()
-            .map(|q| q.stealer())
-            .collect::<Arc<[_]>>();
+    let result = Arc::new(Mutex::new(None));
 
-        workers_queues
-            .into_iter()
-            .map(|q| Worker {
-                local_queue: q,
-                shared_queue: shared_queue.clone(),
-                stealers: stealers.clone(),
-            })
-            .for_each(|w| {
-                std::thread::spawn(|| w.event_loop());
-            });
+    let result_cloned = Arc::clone(&result);
+    let wrapped_future = async move {
+        let result = future.await;
+        *result_cloned.lock().unwrap() = Some(result);
+    };
 
-        Self { shared_queue }
-    }
+    shared_queue.push(Task::new(wrapped_future));
 
-    pub fn spawn<T: 'static + Send>(
-        &self,
-        future: impl Future<Output = T> + 'static + Send,
-    ) -> JoinHandle<T> {
-        let result = Arc::new(Mutex::new(None));
+    JoinHandle::new(result)
+}
 
-        let result_cloned = Arc::clone(&result);
-        let wrapped_future = async move {
-            let result = future.await;
-            *result_cloned.lock().unwrap() = Some(result);
-        };
+pub fn block_on(future: impl Future<Output = ()> + 'static + Send) {
+    let handle = spawn(future);
 
-        self.shared_queue.push(Task::new(wrapped_future));
-
-        JoinHandle::new(result)
-    }
-
-    pub fn block_on(&self, future: impl Future<Output = ()> + 'static + Send) {
-        let handle = self.spawn(future);
-
-        while handle.is_ready().is_none() {
-            std::thread::sleep(Duration::from_millis(1));
-        }
+    while handle.is_ready().is_none() {
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -118,7 +111,8 @@ impl Worker {
 
     fn search_task(&self) -> Option<Task> {
         self.local_queue.pop().or_else(|| {
-            if let Steal::Success(task) = self.shared_queue.steal() {
+            let shared_queue = SHARED_QUEUE.get().expect("Runtime is not created");
+            if let Steal::Success(task) = shared_queue.steal() {
                 Some(task)
             } else {
                 self.stealers.iter().find_map(|s| match s.steal() {
