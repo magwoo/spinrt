@@ -16,6 +16,7 @@ impl Future for Sleep {
     }
 }
 
+#[must_use]
 pub fn sleep(duration: Duration) -> Sleep {
     let since = Instant::now().checked_add(duration).unwrap();
 
