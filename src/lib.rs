@@ -86,9 +86,11 @@ impl Worker {
             let mut pending_tasks = Vec::new();
 
             while let Some(task) = self.search_tasks() {
-                task.run(&mut pending_tasks);
+                let is_solved = task.run(&mut pending_tasks);
 
-                solved += 1;
+                if is_solved {
+                    solved += 1;
+                }
             }
 
             pending_tasks.into_iter().for_each(|task| {
@@ -132,13 +134,15 @@ impl Task {
         }
     }
 
-    fn run(mut self, pendings: &mut Vec<Self>) {
+    fn run(mut self, pendings: &mut Vec<Self>) -> bool {
         let waker = Waker::noop();
 
         // FIXME: move result return here
         match self.future.as_mut().poll(&mut Context::from_waker(waker)) {
-            Poll::Ready(_) => println!("some task is done"),
+            Poll::Ready(_) => return true,
             Poll::Pending => pendings.push(self),
         }
+
+        false
     }
 }
