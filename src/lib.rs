@@ -74,8 +74,8 @@ pub fn block_on(future: impl Future<Output = ()> + 'static + Send) {
 }
 
 impl Worker {
-    const MIN_PASS_TIMEOUT: Duration = Duration::from_micros(50);
-    const MAX_PASS_TIMEOUT: Duration = Duration::from_millis(1);
+    const MIN_PASS_TIMEOUT: Duration = Duration::from_micros(500);
+    const MAX_PASS_TIMEOUT: Duration = Duration::from_millis(25);
 
     fn event_loop(self) -> ! {
         let mut pass_timeout = Self::MIN_PASS_TIMEOUT;
@@ -103,6 +103,7 @@ impl Worker {
             };
 
             let pass_duration = last_pass.elapsed();
+
             if pass_duration < pass_timeout {
                 std::thread::sleep(pass_timeout - pass_duration);
             }
