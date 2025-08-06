@@ -1,8 +1,6 @@
 use spinrt::net::UdpSocket;
-use std::{
-    mem::MaybeUninit,
-    time::{Duration, Instant},
-};
+use std::mem::MaybeUninit;
+use std::time::{Duration, Instant};
 
 fn main() {
     spinrt::create(8);
@@ -10,12 +8,13 @@ fn main() {
     let a = spinrt::spawn(my_async_fn());
 
     for i in 0..1000 {
-        spinrt::spawn(async move {
+        spinrt::spawn_blocking(move || {
             for j in 0..3 {
                 println!("spawn {i} ticked {j}");
-                spinrt::time::sleep(Duration::from_secs(1)).await;
+                std::thread::sleep(Duration::from_secs(1));
             }
-        });
+        })
+        .join();
     }
 
     spinrt::block_on(async move {

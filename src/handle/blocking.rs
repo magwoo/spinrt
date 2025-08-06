@@ -10,7 +10,6 @@ impl<T: 'static + Send> BlockingJoinHandle<T> {
     pub fn join(self) -> T {
         loop {
             let guard = self.0.0.lock().unwrap();
-
             let mut lock = self.0.1.wait(guard).unwrap();
 
             if let Some(result) = lock.take() {

@@ -111,7 +111,7 @@ pub fn spawn_blocking<F: FnOnce() -> T + 'static + Send, T: 'static + Send + Syn
     queue.push_back(Box::new(move || {
         let exec_result = f();
         lock_clone.0.lock().unwrap().replace(exec_result);
-        drop(lock_clone);
+        lock_clone.1.notify_one();
     }));
 
     drop(queue);
