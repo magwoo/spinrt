@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 crossbeam-deque = "0.8.6"
+socket2 = "0.6.0"

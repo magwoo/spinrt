@@ -2,12 +2,16 @@ use core::future::Future;
 use crossbeam_deque::Injector as SharedQueue;
 use crossbeam_deque::Worker as WorkerQueue;
 use crossbeam_deque::{Steal, Stealer};
+use std::collections::VecDeque;
 use std::pin::Pin;
+use std::sync::Condvar;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
 pub use handle::JoinHandle;
+
+use crate::handle::blocking::BlockingJoinHandle;
 
 mod handle;
 
@@ -15,7 +19,11 @@ pub mod macros;
 pub mod net;
 pub mod time;
 
+type BlockingTask = dyn FnOnce() + 'static + Send;
+
 static SHARED_QUEUE: OnceLock<SharedQueue<Task>> = OnceLock::new();
+static BLOCKING_QUEUE: OnceLock<Arc<Mutex<VecDeque<Box<BlockingTask>>>>> = OnceLock::new();
+static BLOCKUNG_QUEUE_CONDVAR: Condvar = Condvar::new();
 
 struct Task {
     future: Pin<Box<dyn Future<Output = ()> + 'static + Send>>,
@@ -28,17 +36,43 @@ struct Worker {
 
 pub fn create(workers_num: usize) {
     SHARED_QUEUE.get_or_init(SharedQueue::default);
+    BLOCKING_QUEUE.get_or_init(Arc::default);
 
-    let workers_queues = (0..workers_num)
+    (0..workers_num).for_each(|_| {
+        std::thread::spawn(|| {
+            loop {
+                let guard = BLOCKING_QUEUE
+                    .get()
+                    .expect("must be inited")
+                    .lock()
+                    .unwrap();
+
+                let (mut queue, _) = BLOCKUNG_QUEUE_CONDVAR
+                    .wait_timeout(guard, Duration::from_millis(1))
+                    .unwrap();
+
+                let task = match queue.pop_front() {
+                    Some(task) => task,
+                    None => continue,
+                };
+
+                drop(queue);
+
+                task();
+            }
+        });
+    });
+
+    let worker_queues = (0..workers_num)
         .map(|_| WorkerQueue::new_fifo())
         .collect::<Vec<_>>();
 
-    let stealers = workers_queues
+    let stealers = worker_queues
         .iter()
         .map(|q| q.stealer())
         .collect::<Arc<[_]>>();
 
-    workers_queues
+    worker_queues
         .into_iter()
         .map(|q| Worker {
             local_queue: q,
@@ -65,10 +99,31 @@ pub fn spawn<T: 'static + Send>(future: impl Future<Output = T> + 'static + Send
     JoinHandle::new(result)
 }
 
+pub fn spawn_blocking<F: FnOnce() -> T + 'static + Send, T: 'static + Send + Sync>(
+    f: F,
+) -> BlockingJoinHandle<T> {
+    let queue = BLOCKING_QUEUE.get().expect("must be initialized");
+
+    let mut queue = queue.lock().unwrap();
+    let lock = Arc::new((Mutex::new(None), Condvar::new()));
+
+    let lock_clone = Arc::clone(&lock);
+    queue.push_back(Box::new(move || {
+        let exec_result = f();
+        lock_clone.0.lock().unwrap().replace(exec_result);
+        drop(lock_clone);
+    }));
+
+    drop(queue);
+    BLOCKUNG_QUEUE_CONDVAR.notify_one();
+
+    BlockingJoinHandle::new(lock)
+}
+
 pub fn block_on(future: impl Future<Output = ()> + 'static + Send) {
     let handle = spawn(future);
 
-    while handle.is_ready().is_none() {
+    while handle.nonblocking_pool().is_none() {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
