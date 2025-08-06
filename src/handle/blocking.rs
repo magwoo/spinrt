@@ -7,6 +7,14 @@ impl<T: 'static + Send> BlockingJoinHandle<T> {
         Self(lock)
     }
 
+    pub fn poll_nonblocking(&self) -> Option<T> {
+        if let Ok(mut lock) = self.0.0.try_lock() {
+            return lock.take();
+        }
+
+        None
+    }
+
     pub fn join(self) -> T {
         loop {
             let guard = self.0.0.lock().unwrap();
