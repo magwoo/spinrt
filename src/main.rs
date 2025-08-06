@@ -1,51 +1,27 @@
 use spinrt::net::UdpSocket;
-use std::mem::MaybeUninit;
-use std::time::{Duration, Instant};
+use std::mem::{MaybeUninit, transmute};
+use std::time::Duration;
 
 fn main() {
     spinrt::create(8);
 
-    let a = spinrt::spawn(my_async_fn());
+    for port in 7000..8000 {
+        spinrt::spawn(async move {
+            let socket = UdpSocket::bind(format!("0.0.0.0:{port}").as_str())
+                .await
+                .unwrap();
 
-    for i in 0..1000 {
-        spinrt::spawn_blocking(move || {
-            for j in 0..3 {
-                println!("spawn {i} ticked {j}");
-                std::thread::sleep(Duration::from_secs(1));
+            let mut buf = [MaybeUninit::uninit(); 4096];
+
+            loop {
+                let readed = socket.recv(&mut buf).await.unwrap();
+
+                println!("port {port} handled: {}", unsafe {
+                    String::from_utf8_lossy(transmute::<&[MaybeUninit<u8>], &[u8]>(&buf[..readed]))
+                })
             }
-        })
-        .join();
+        });
     }
 
-    spinrt::block_on(async move {
-        let handle = spinrt::spawn(listen_udp_socket());
-
-        let now = Instant::now();
-
-        spinrt::time::sleep(Duration::from_secs(1)).await;
-        println!("Hello World!, elapsed: {:?}", now.elapsed());
-
-        println!("my async fn result: {}", a.await);
-        println!("Hello World!, elapsed: {:?}", now.elapsed());
-
-        handle.await;
-    });
-}
-
-async fn my_async_fn() -> i32 {
-    spinrt::time::sleep(Duration::from_secs(3)).await;
-
-    7
-}
-
-async fn listen_udp_socket() {
-    let socket = UdpSocket::bind("0.0.0.0:7500").await.unwrap();
-
-    let mut buf = [MaybeUninit::uninit(); 4096];
-
-    loop {
-        let readed = socket.recv(&mut buf).await.unwrap();
-
-        println!("udp socket readed {} bytes: {:?}", readed, &buf[..readed])
-    }
+    spinrt::block_on(spinrt::time::sleep(Duration::from_secs(u32::MAX as u64)));
 }

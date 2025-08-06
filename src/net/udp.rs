@@ -1,4 +1,4 @@
-use std::io::{self};
+use std::io::{self, ErrorKind};
 use std::mem::MaybeUninit;
 
 use crate::net::ToSocketAddrs;
@@ -8,11 +8,10 @@ pub struct UdpSocket(Socket);
 
 impl UdpSocket {
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        let address = addr
-            .to_socket_addrs()
-            .await?
-            .next()
-            .ok_or(io::Error::other("missing addr"))?;
+        let address = addr.to_socket_addrs().await?.next().ok_or(io::Error::new(
+            ErrorKind::InvalidInput,
+            "could not resolve to any address",
+        ))?;
 
         let socket = Socket::new(
             Domain::for_address(address),
@@ -33,7 +32,12 @@ impl UdpSocket {
         self.0.send(buf).await
     }
 
-    // pub async fn send_to(&self, buf: &[u8], addr: &SocketAddr) -> io::Result<usize> {
-    //     self.0.send_to(buf, addr.into()).await
-    // }
+    pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: &A) -> io::Result<usize> {
+        let address = addr.to_socket_addrs().await?.next().ok_or(io::Error::new(
+            ErrorKind::InvalidInput,
+            "could not resolve to any address",
+        ))?;
+
+        self.0.send_to(buf, &address.into()).await
+    }
 }
