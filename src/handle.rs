@@ -12,10 +12,8 @@ impl<T: 'static + Send> JoinHandle<T> {
     }
 
     pub fn nonblocking_pool(&self) -> Option<T> {
-        if let Ok(mut lock) = self.0.try_lock()
-            && let Some(result) = lock.take()
-        {
-            return Some(result);
+        if let Ok(mut lock) = self.0.try_lock() {
+            return lock.take();
         }
 
         None

@@ -1,7 +1,7 @@
 use std::io::{self};
 use std::mem::MaybeUninit;
-use std::net::ToSocketAddrs;
 
+use crate::net::ToSocketAddrs;
 use crate::net::socket::{Domain, Protocol, Socket, Type};
 
 pub struct UdpSocket(Socket);
@@ -9,7 +9,8 @@ pub struct UdpSocket(Socket);
 impl UdpSocket {
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
         let address = addr
-            .to_socket_addrs()?
+            .to_socket_addrs()
+            .await?
             .next()
             .ok_or(io::Error::other("missing addr"))?;
 
@@ -18,6 +19,8 @@ impl UdpSocket {
             Type::DGRAM,
             Some(Protocol::UDP),
         )?;
+
+        socket.bind(&address.into()).await?;
 
         Ok(Self(socket))
     }
