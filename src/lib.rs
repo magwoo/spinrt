@@ -123,7 +123,7 @@ pub fn spawn_blocking<F: FnOnce() -> T + 'static + Send, T: 'static + Send + Syn
 pub fn block_on(future: impl Future<Output = ()> + 'static + Send) {
     let handle = spawn(future);
 
-    while handle.nonblocking_pool().is_none() {
+    while handle.pool_nonblocking().is_none() {
         std::thread::sleep(Duration::from_millis(1));
     }
 }

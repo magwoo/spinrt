@@ -11,7 +11,7 @@ impl<T: 'static + Send> JoinHandle<T> {
         Self(inner)
     }
 
-    pub fn nonblocking_pool(&self) -> Option<T> {
+    pub fn pool_nonblocking(&self) -> Option<T> {
         if let Ok(mut lock) = self.0.try_lock() {
             return lock.take();
         }
@@ -24,7 +24,7 @@ impl<T: 'static + Send> Future for JoinHandle<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.nonblocking_pool() {
+        match self.pool_nonblocking() {
             Some(result) => Poll::Ready(result),
             None => Poll::Pending,
         }
