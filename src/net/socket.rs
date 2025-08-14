@@ -23,7 +23,19 @@ impl Socket {
     }
 
     pub async fn connect(&self, address: &SockAddr) -> io::Result<()> {
-        nonblocking_future(|| self.0.connect(address)).await
+        match self.0.connect(address) {
+            Ok(_) => return Ok(()),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => (),
+            Err(err) if err.raw_os_error().is_some_and(|c| c == 36) => (),
+            Err(err) => return Err(err),
+        }
+
+        core::future::poll_fn(move |_| match self.0.send(&[]) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(err) if err.kind() == ErrorKind::NotConnected => Poll::Pending,
+            Err(err) => Poll::Ready(Err(err)),
+        })
+        .await
     }
 
     pub async fn connect_timeout(&self, _addr: &SockAddr, _timeout: Duration) -> io::Result<()> {
@@ -87,6 +99,7 @@ pub fn nonblocking_future<T>(
     core::future::poll_fn(move |_| match f() {
         Ok(result) => Poll::Ready(Ok(result)),
         Err(err) if err.kind() == ErrorKind::WouldBlock => Poll::Pending,
+        Err(err) if err.raw_os_error().is_some_and(|c| c == 36) => Poll::Pending,
         Err(err) => Poll::Ready(Err(err)),
     })
 }
